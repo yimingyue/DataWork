@@ -1,0 +1,31 @@
+Instructions to run this program:
+
+1) build the project
+# mvn clean package
+
+2) run the project
+# java -jar target/avgusertime-1.0.jar
+It will print the usage.
+# java -jar target/avgusertime-1.0.jar <inputFilePath> <outputFilePath> <workingDirectory> [strategy]
+Strategy is optional. By default it will use DROP strategy. Strategy options:
+	1. drop - drop strategy will drop the unmatched open or close event
+	2. average - average will use the average timestamp between two consecutive open or close event as missing the close or open time
+	3. max - longest will use the new open timestamp for the missing close or the last close time as missing open
+example:
+# java -jar target/avgusertime-1.0.jar input.csv output.csv /tmp/avgusertime drop
+
+Idea explain:
+Assumptions:
+  The hashcode of the user ids distributed evenly. And there is no abnormal users which has a large amount of events in the log (> 1,000,000).
+Step One:
+  Read the large input log file line by line. For each line, get the userId and use the hashcode of the userId to map the user to the list it belongs. Timestamp and action type is also obtained from the line. In the list, It simply stores the userId-timestamp pair. For open action, the neative value of the timestamp is stored while the positive timestamp is stored for close action. This reduces the file size of the intermetiate files. When the size of the list grows larger than the threshold, flush the list to the file on dist. Each list map to only one file on dist determined by the index of the list. Since all events of the same user go into the same list, and pairs from one list go to the same file, it ensures all events related to one user will go to one file.
+
+Step two:
+  For each intermediate file, read it in line by line. Also, maintain a HashMap for each user from this file. The key is userId and value is the latest timestamp. Get user and timestamp from a new line, and compare the new timestamp with the old one in the HashMap if there is. Here are four cases for the two consecutive timestamps for one user:
+  1. negative - positive: This is a normal open - close pair. Aggregate the value for this user and update the map.
+  2. positive - negative: This is a normal close - open pair. Update the map.
+  3. negative - negative: This is a open - open pair, which indicate there might be a missing close action between them. Here we can apply different strategy to get the result.
+  4. positive - positive: This is a close - close pair, which indicate there might be a missing open action between them. Similarly, we can apply different strategy to get the result.
+  After processing all the records of each file, calculate the average time spent for each user then write to the output file.
+
+Tested with 1B records (24GB size) inputs. Generate output in around 30 minutes on my machine with 2 Core CPU, 4GB RAM and 100 GB disk. 
